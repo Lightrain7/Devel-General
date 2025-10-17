@@ -2,7 +2,7 @@
 
 A Nim-based tool for extracting mass spectrometry data from Common Data Format (CDF) files, commonly used in mass spectrometry and metabolomics. This tool parses NetCDF-formatted CDF files and extracts m/z (mass-to-charge ratio) and intensity values into delimited formats like CSV or TSV.
 
-## Overview
+## Overview 
 
 CDF files contain raw mass spectrometry data stored in the NetCDF format. This tool provides both a standalone command-line interface for extracting data to CSV files and a Nim library for programmatic access to the data.
 

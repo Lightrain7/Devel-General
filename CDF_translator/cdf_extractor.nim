@@ -33,7 +33,14 @@ type
   CdfFile = ref object
     filename: string
 
-  MassSpecData* = seq[(float64, float64)]  ## Sequence of (m/z, intensity) pairs
+  # Single scan data: (retention_time, m/z, intensity)
+  ScanData* = tuple[time: float64, mz: float64, intensity: float64]
+
+  # Complete dataset with all scans
+  MassSpecData* = seq[ScanData]  ## Sequence of (time, m/z, intensity) triplets
+
+  # Alternative format for when we want all data from one scan together
+  ScanBasedData* = seq[tuple[time: float64, masses: seq[float64], intensities: seq[float64]]]
 
 
 proc loadCdf(filename: string): CdfFile =
@@ -83,18 +90,81 @@ proc toDelimited*(data: seq[float64], filename: string, delimiter: string = ",")
     f.write(&"{val}{delimiter}")
   f.write("\n")
 
-## Extract mass spectrometry data from CDF file as (m/z, intensity) pairs
+## Extract mass spectrometry data from CDF file with elution times
 proc extractCdfData*(inputFile: string): MassSpecData =
   let cdf = loadCdf(inputFile)
+
+  # Extract scan acquisition times (elution times)
+  let times = cdf.extractData("scan_acquisition_time")
+  if times.len == 0:
+    echo "Warning: No scan_acquisition_time found, trying time_values"
+    let times = cdf.extractData("time_values")
+    if times.len == 0:
+      echo "Error: No time data found"
+      return @[]
+
+  # Extract mass and intensity values
   let masses = cdf.extractData("mass_values")
   let intensities = cdf.extractData("intensity_values")
   if masses.len == 0 or intensities.len == 0:
+    echo "Error: No mass or intensity data found"
     return @[]
-  result = newSeq[(float64, float64)](masses.len)
-  for i in 0..<masses.len:
-    result[i] = (masses[i], intensities[i])
 
-## Extract data from CDF file and save to CSV file
+  # Extract point counts for each scan
+  let pointCounts = cdf.extractData("point_count")
+  if pointCounts.len == 0:
+    echo "Warning: No point_count found, assuming single scan"
+    # If no point count, treat as single scan
+    result = newSeq[ScanData](masses.len)
+    for i in 0..<masses.len:
+      result[i] = (times[0], masses[i], intensities[i])
+    return result
+
+  # Reconstruct scans based on point counts
+  result = newSeq[ScanData]()
+  var massIndex = 0
+  var intensityIndex = 0
+
+  # Check total points from point counts
+  var totalPoints = 0
+  for count in pointCounts:
+    totalPoints += count.int
+
+  # If point counts don't match or are all zero, use alternative structure
+  if totalPoints == 0 and times.len >= 1:
+    # Assume single scan structure - use first time value for all points
+    result = newSeq[ScanData](masses.len)
+    for i in 0..<masses.len:
+      result[i] = (times[0], masses[i], intensities[i])
+    return result
+
+  if totalPoints == 0:
+    echo &"Error: Cannot determine data structure. times.len={times.len}, masses.len={masses.len}"
+    return @[]
+
+  if totalPoints != masses.len:
+    echo &"Warning: Point count sum ({totalPoints}) doesn't match mass/intensity array lengths ({masses.len})"
+
+  for scanIdx in 0..<times.len:
+    let pointsInScan = pointCounts[scanIdx].int
+    let scanTime = times[scanIdx]
+
+    for pointIdx in 0..<pointsInScan:
+      if massIndex < masses.len and intensityIndex < intensities.len:
+        result.add((scanTime, masses[massIndex], intensities[intensityIndex]))
+        massIndex += 1
+        intensityIndex += 1
+
+  echo &"Extracted {result.len} data points from {times.len} scans"
+
+## Legacy function for backward compatibility - returns (m/z, intensity) pairs only
+proc extractCdfDataLegacy*(inputFile: string): seq[(float64, float64)] =
+  let newData = extractCdfData(inputFile)
+  result = newSeq[(float64, float64)](newData.len)
+  for i in 0..<newData.len:
+    result[i] = (newData[i].mz, newData[i].intensity)
+
+## Extract data from CDF file and save to CSV/TSV file with elution times
 proc extractCdfToFile*(inputFile: string, outputFile: string) =
   let data = extractCdfData(inputFile)
   if data.len == 0:
@@ -103,17 +173,42 @@ proc extractCdfToFile*(inputFile: string, outputFile: string) =
   let ext = outputFile.splitFile.ext.toLowerAscii()
   let isTsv = ext == ".tsv"
   let delim = if isTsv: "\t" else: ","
-  let header = if isTsv: "mz\tintensity\n" else: "mz,intensity\n"
+  let header = if isTsv: "retention_time\tmz\tintensity\n" else: "retention_time,mz,intensity\n"
   let f = open(outputFile, fmWrite)
   defer: f.close()
   f.write(header)
-  for (mz, intensity) in data:
-    f.write(&"{mz}{delim}{intensity}\n")
+  for scanData in data:
+    f.write(&"{scanData.time}{delim}{scanData.mz}{delim}{scanData.intensity}\n")
   echo &"Extracted {data.len} data points to {outputFile}"
 
 # Main proc for CLI usage
+# Utility function to list all variables in a CDF file
+proc listCdfVariables(filename: string) =
+  var ncid: NcId
+  if nc_open(filename.cstring, NC_NOWRITE, ncid) != NC_NOERR:
+    echo "Could not open CDF file"
+    return
+  defer: discard nc_close(ncid)
+
+  echo &"Variables in {filename}:"
+  # This is a simplified approach - in a full implementation you'd query all variables
+  # For now, let's try common variable names used in CDF files
+  let commonVars = ["scan_acquisition_time", "retention_time", "time_values",
+                   "mass_values", "intensity_values", "point_count",
+                   "scan_index", "scan_number", "actual_delay",
+                   "a_d_sampling_rate", "scan_duration", "inter_scan_time"]
+
+  for varName in commonVars:
+    var varid: cint
+    if nc_inq_varid(ncid, varName.cstring, varid) == NC_NOERR:
+      echo &"  ✓ {varName}"
+    else:
+      echo &"  ✗ {varName}"
+
 proc main() =
-  if paramCount() == 2:
+  if paramCount() == 2 and paramStr(1) == "--list-vars":
+    listCdfVariables(paramStr(2))
+  elif paramCount() == 2:
     extractCdfToFile(paramStr(1), paramStr(2))
   elif paramCount() == 1:
     let parts = splitFile(paramStr(1))
@@ -121,7 +216,7 @@ proc main() =
     extractCdfToFile(paramStr(1), outFile)
     echo &"No output specified. Defaulting to {outFile}"
   else:
-    echo "Usage: cdf_extractor input.cdf [output.(csv|tsv)]"
+    echo "Usage: cdf_extractor [--list-vars file.cdf | input.cdf [output.(csv|tsv)]]"
 
 when isMainModule:
   main()
