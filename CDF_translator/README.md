@@ -1,6 +1,6 @@
 # CDF Extractor
 
-A Nim-based tool for extracting mass spectrometry data from Common Data Format (CDF) files, commonly used in mass spectrometry and metabolomics. This tool parses NetCDF-formatted CDF files and extracts m/z (mass-to-charge ratio) and intensity values into delimited formats like CSV.
+A Nim-based tool for extracting mass spectrometry data from Common Data Format (CDF) files, commonly used in mass spectrometry and metabolomics. This tool parses NetCDF-formatted CDF files and extracts m/z (mass-to-charge ratio) and intensity values into delimited formats like CSV or TSV.
 
 ## Overview
 
@@ -63,18 +63,22 @@ nim c -d:release cdf_extractor.nim
 After compilation, run the tool with:
 
 ```bash
-./cdf_extractor input.cdf output.csv
+./cdf_extractor input.cdf [output.(csv|tsv)]
 ```
 
 - `input.cdf`: Path to the input CDF file
-- `output.csv`: Path where the extracted data will be saved
+- `output.(csv|tsv)`: Optional. If omitted, defaults to `{basename(input)}.tsv` in the same directory.
 
-Example:
+Examples:
 ```bash
+# Default output: sample.tsv
+./cdf_extractor sample.cdf
+
+# Explicit CSV output
 ./cdf_extractor sample.cdf results.csv
 ```
 
-The output CSV file will contain columns:
+The output file (CSV or TSV) will contain columns:
 - `mz`: Mass-to-charge ratio values
 - `intensity`: Corresponding intensity values
 
@@ -98,7 +102,7 @@ extractCdfToFile("sample.cdf", "results.csv")
 
 - `MassSpecData`: Type alias for `seq[(float64, float64)]` - sequence of (m/z, intensity) pairs
 - `extractCdfData*(inputFile: string): MassSpecData`: Extracts data programmatically
-- `extractCdfToFile*(inputFile: string, outputFile: string)`: Extracts and saves to CSV file
+- `extractCdfToFile*(inputFile: string, outputFile: string)`: Extracts and saves to CSV/TSV file
 
 ## Error Handling
 

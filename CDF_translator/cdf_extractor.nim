@@ -100,19 +100,28 @@ proc extractCdfToFile*(inputFile: string, outputFile: string) =
   if data.len == 0:
     echo "Required variables not found or empty"
     return
+  let ext = outputFile.splitFile.ext.toLowerAscii()
+  let isTsv = ext == ".tsv"
+  let delim = if isTsv: "\t" else: ","
+  let header = if isTsv: "mz\tintensity\n" else: "mz,intensity\n"
   let f = open(outputFile, fmWrite)
   defer: f.close()
-  f.write("mz,intensity\n")
+  f.write(header)
   for (mz, intensity) in data:
-    f.write(&"{mz},{intensity}\n")
+    f.write(&"{mz}{delim}{intensity}\n")
   echo &"Extracted {data.len} data points to {outputFile}"
 
 # Main proc for CLI usage
 proc main() =
   if paramCount() == 2:
     extractCdfToFile(paramStr(1), paramStr(2))
+  elif paramCount() == 1:
+    let parts = splitFile(paramStr(1))
+    let outFile = parts.dir / (parts.name & ".tsv")
+    extractCdfToFile(paramStr(1), outFile)
+    echo &"No output specified. Defaulting to {outFile}"
   else:
-    echo "Usage: cdf_extractor input.cdf output.csv"
+    echo "Usage: cdf_extractor input.cdf [output.(csv|tsv)]"
 
 when isMainModule:
   main()
